@@ -16,6 +16,13 @@ class Tracker
         if (!Loader::includeModule('sale')) { return; }
         $basket = $event->getParameter('ENTITY');
         if (!$basket instanceof \Bitrix\Sale\BasketBase) { return; }
+        self::syncBasket($basket);
+    }
+
+    public static function syncBasket(\Bitrix\Sale\BasketBase $basket): void
+    {
+        // Order basket saves also emit OnSaleBasketSaved. They must not reopen a completed order.
+        if ((int)$basket->getOrderId() > 0) { return; }
         $fuserId = (int)$basket->getFUserId();
         $siteId = (string)$basket->getSiteId();
         if ($fuserId <= 0 || $siteId === '') { return; }
@@ -43,7 +50,7 @@ class Tracker
         $existing = $connection->query('SELECT ID, STATUS FROM ' . self::TABLE . ' WHERE FUSER_ID=' . $fuserId . " AND SITE_ID='" . $sql->forSql($siteId) . "'")->fetch();
         if (!$items) {
             if ($existing && $existing['STATUS'] !== 'ordered') {
-                $connection->queryExecute('DELETE FROM ' . self::TABLE . ' WHERE ID=' . (int)$existing['ID']);
+                $connection->queryExecute('DELETE FROM ' . self::TABLE . ' WHERE ID=' . (int)$existing['ID'] . " AND STATUS<>'ordered'");
             }
             return;
         }
@@ -52,8 +59,11 @@ class Tracker
         $json = $sql->forSql(json_encode($items, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE));
         $fields = "USER_ID=" . ($userId ?: 'NULL') . ", ITEMS_JSON='" . $json . "', ITEMS_COUNT=" . $count . ", TOTAL=" . round($total, 2) . ", CURRENCY='" . $sql->forSql($currency) . "', UPDATED_AT=NOW()";
         if ($existing) {
-            // Новая корзина после заказа снова становится активной.
-            $connection->queryExecute('UPDATE ' . self::TABLE . " SET {$fields}, STATUS='active', ORDER_ID=NULL WHERE ID=" . (int)$existing['ID']);
+            // A genuinely new customer basket must not inherit the previous order's contacts.
+            $reset = $existing['STATUS'] === 'ordered'
+                ? ', EMAIL=NULL, PHONE=NULL, CUSTOMER_NAME=NULL, DELIVERY_ADDRESS=NULL, ORDER_COMMENT=NULL, DELIVERY_METHOD=NULL, PAYMENT_METHOD=NULL, CHECKOUT_DATA=NULL, CHECKOUT_UPDATED_AT=NULL'
+                : '';
+            $connection->queryExecute('UPDATE ' . self::TABLE . " SET {$fields}, STATUS='active', ORDER_ID=NULL{$reset} WHERE ID=" . (int)$existing['ID'] . " AND STATUS='" . $sql->forSql($existing['STATUS']) . "'");
         } else {
             $connection->queryExecute('INSERT INTO ' . self::TABLE . " SET FUSER_ID={$fuserId}, SITE_ID='" . $sql->forSql($siteId) . "', {$fields}, STATUS='active', CREATED_AT=NOW()");
         }
@@ -61,6 +71,8 @@ class Tracker
 
     public static function onOrderSaved(\Bitrix\Main\Event $event): void
     {
+        // Editing an old order must not mark a newer customer basket as ordered.
+        if ($event->getParameter('IS_NEW') === false) { return; }
         $order = $event->getParameter('ENTITY');
         if (!$order instanceof \Bitrix\Sale\Order || !$order->getId()) { return; }
         $orderBasket = $order->getBasket();
@@ -69,7 +81,7 @@ class Tracker
         if (!$fuserId) { return; }
         $connection = Application::getConnection();
         $site = $connection->getSqlHelper()->forSql((string)$order->getSiteId());
-        $connection->queryExecute('UPDATE ' . self::TABLE . " SET STATUS='ordered', ORDER_ID=" . (int)$order->getId() . " WHERE FUSER_ID={$fuserId} AND SITE_ID='{$site}' AND STATUS IN ('active','abandoned')");
+        $connection->queryExecute('UPDATE ' . self::TABLE . " SET UPDATED_AT=NOW(), STATUS='ordered', ORDER_ID=" . (int)$order->getId() . " WHERE FUSER_ID={$fuserId} AND SITE_ID='{$site}' AND STATUS IN ('active','abandoned')");
     }
 
     public static function saveContact(int $fuserId, string $siteId, array $data): bool

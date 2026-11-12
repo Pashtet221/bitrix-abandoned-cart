@@ -1,2 +1,2 @@
 <?php
-$arModuleVersion = ['VERSION' => '1.0.3', 'VERSION_DATE' => '2026-11-12'];
+$arModuleVersion = ['VERSION' => '1.0.4', 'VERSION_DATE' => '2026-11-12'];

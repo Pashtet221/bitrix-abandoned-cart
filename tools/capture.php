@@ -15,7 +15,6 @@ try {
     if (!\Bitrix\Main\Loader::includeModule('pv.abandonedcart')) {
         throw new \RuntimeException('Module unavailable');
     }
-    $raw = file_get_contents('php://input');
     // FormData is used by the JS; no JSON request body is needed.
     $result = \PV\AbandonedCart\Checkout::capture($_POST);
     echo json_encode($result, JSON_UNESCAPED_UNICODE);
