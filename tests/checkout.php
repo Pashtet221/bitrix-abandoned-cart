@@ -95,7 +95,7 @@ namespace Bitrix\Sale\Internals {
                 ['ID'=>6, 'CODE'=>'ADDRESS', 'TYPE'=>'STRING'],
                 ['ID'=>7, 'CODE'=>'UNRELATED', 'TYPE'=>'STRING'],
             ];
-            return new \Fixtures\Rows(array_filter($rows, static function ($row) use ($options) { return in_array($row['ID'], $options['filter']['@ID']); }));
+            return new \Fixtures\Rows(array_filter($rows, static function ($row) use ($options, $rows) { return in_array($row['ID'], ($options['filter']['@ID'] ?? array_column($rows, 'ID'))); }));
         }
     }
 }
@@ -111,6 +111,12 @@ namespace Bitrix\Sale\Delivery\Services {
 }
 namespace Bitrix\Sale\PaySystem {
     class Manager { public static function getById($id) { return $id === 2 ? ['NAME'=>'Наличными при получении'] : false; } }
+}
+namespace Bitrix\Main\Config {
+    class Option {
+        public static $capture = 'Y';
+        public static function get($module, $name, $default) { return self::$capture; }
+    }
 }
 namespace Bitrix\Main\Page {
     class Asset {
@@ -129,6 +135,7 @@ namespace {
     require __DIR__ . '/../lib/checkout.php';
     require __DIR__ . '/../lib/tracker.php';
     function check($condition, $message) { if (!$condition) { throw new \RuntimeException($message); } }
+    function capture(array $input) { return Checkout::capture($input + ['consent'=>'Y']); }
     function containsAll($sql, array $values) {
         foreach ($values as $value) { check(strpos($sql, $value) !== false, 'Missing ' . $value); }
     }
@@ -136,24 +143,24 @@ namespace {
     \Bitrix\Main\Application::$connection = $connection;
     \Bitrix\Sale\Basket::$loaded = new \Bitrix\Sale\Basket();
     $input = ['properties'=>json_encode([1=>'Иван Иванов', 2=>'test@example.test', 3=>'+7 999 123-45-67', 4=>'0000073738', 5=>'190000', 6=>"Невский, д. 1", 7=>'do-not-save']), 'delivery'=>'3', 'payment'=>'2'];
-    check(Checkout::capture($input)['ok'], 'capture succeeds');
+    check(capture($input)['ok'], 'capture succeeds');
     containsAll($connection->latest(), ['Иван Иванов','test@example.test','+7 999','Санкт-Петербург','190000','Невский','Курьер','Наличными при получении','CHECKOUT_UPDATED_AT=NOW()']);
     check(strpos($connection->latest(), 'do-not-save') === false, 'Unrelated property excluded');
     check(Checkout::methodName('delivery', '3') === 'Курьер', 'Legacy delivery ID');
     check(Checkout::methodName('payment', '2') === 'Наличными при получении', 'Legacy payment ID');
     check(Checkout::methodName('delivery', '999') === '999', 'Deleted service preserves ID');
     $id = $connection->record['ID'];
-    check(Checkout::capture(['properties'=>json_encode([3=>'+7 999 000-00-00', 5=>'190001'])])['ok'], 'Partial checkout update');
+    check(capture(['properties'=>json_encode([3=>'+7 999 000-00-00', 5=>'190001'])])['ok'], 'Partial checkout update');
     check($connection->record['ID'] === $id, 'Updates same basket row');
     containsAll($connection->latest(), ['Иван Иванов','test@example.test','+7 999 000-00-00','Санкт-Петербург','190001','Невский']);
-    check(Checkout::capture(['properties'=>json_encode([2=>''])])['ok'], 'Explicit field clearing');
+    check(capture(['properties'=>json_encode([2=>''])])['ok'], 'Explicit field clearing');
     containsAll($connection->latest(), ["EMAIL=''", 'Санкт-Петербург','Невский']);
     $connection->record['STATUS'] = 'abandoned';
-    check(Checkout::capture(['comment'=>'Продолжаю оформление'])['ok'], 'Resuming abandoned checkout');
+    check(capture(['comment'=>'Продолжаю оформление'])['ok'], 'Resuming abandoned checkout');
     check($connection->record['STATUS'] === 'active', 'Customer activity reactivates basket');
     $connection->record['STATUS'] = 'ordered';
     $before = count($connection->updates);
-    check(!Checkout::capture($input)['ok'] && count($connection->updates) === $before, 'Completed order protected from late capture when customer basket empty');
+    check(!capture($input)['ok'] && count($connection->updates) === $before, 'Completed order protected from late capture when customer basket empty');
     $orderBasket = new \Bitrix\Sale\Basket();
     $orderBasket->orderId = 123;
     $orderBasket->items = [new \Fixtures\Item()];
@@ -163,30 +170,34 @@ namespace {
     check(count($connection->updates) === $before, 'Editing old order cannot close new basket');
     $newBasket = new \Bitrix\Sale\Basket(); $newBasket->items = [new \Fixtures\Item()];
     \Bitrix\Sale\Basket::$loaded = $newBasket;
-    check(Checkout::capture(['properties'=>json_encode([3=>'+7 111'])])['ok'], 'New customer basket after completed order');
+    check(capture(['properties'=>json_encode([3=>'+7 111'])])['ok'], 'New customer basket after completed order');
     containsAll($connection->updates[$before], ['EMAIL=NULL', 'CHECKOUT_DATA=NULL', 'ORDER_ID=NULL']);
     check(strpos($connection->latest(), 'test@example.test') === false, 'New basket does not inherit old contacts');
     $connection->record = null;
-    check(Checkout::capture($input)['ok'], 'Backfill basket that predates module event tracking');
+    check(capture($input)['ok'], 'Backfill basket that predates module event tracking');
     $createdId = $connection->record['ID'];
-    check(Checkout::capture(['phone'=>'+7 222'])['ok'] && $connection->record['ID'] === $createdId, 'No duplicate row on repeated capture');
+    check(capture(['phone'=>'+7 222'])['ok'] && $connection->record['ID'] === $createdId, 'No duplicate row on repeated capture');
     containsAll($connection->latest(), ["PHONE='+7 222'"]);
     $connection->record = null;
     \Bitrix\Sale\Basket::$loaded = new \Bitrix\Sale\Basket();
     $before = count($connection->updates);
-    check(!Checkout::capture($input)['ok'] && count($connection->updates) === $before, 'No contacts-only row without a real basket');
-    check(!Checkout::capture(['site_id'=>'bad'])['ok'], 'Unknown site rejected');
+    check(!capture($input)['ok'] && count($connection->updates) === $before, 'No contacts-only row without a real basket');
+    check(!capture(['site_id'=>'bad'])['ok'], 'Unknown site rejected');
     \Bitrix\Sale\Basket::$loaded = $newBasket;
-    check(Checkout::capture(['site_id'=>'s2', 'phone'=>'+7 333'])['ok'], 'Explicit current checkout site');
+    check(capture(['site_id'=>'s2', 'phone'=>'+7 333'])['ok'], 'Explicit current checkout site');
     check(strpos(end($connection->queries), "SITE_ID='s2'") !== false, 'Request uses originating site, not endpoint default site');
     $connection->record['CHECKOUT_DATA'] = null;
     $before = count($connection->updates);
-    check(Checkout::capture(['properties'=>['invalid']])['ok'], 'Malformed properties ignored');
+    check(capture(['properties'=>['invalid']])['ok'], 'Malformed properties ignored');
     check(count($connection->updates) === $before, 'Malformed properties do not write');
+    \Bitrix\Main\Config\Option::$capture = 'N';
+    check(!capture($input)['ok'], 'Server opt-in required');
+    \Bitrix\Main\Config\Option::$capture = 'Y';
+    check(!Checkout::capture($input)['ok'], 'Server requires consent claim');
     Checkout::upgrade(); Checkout::upgrade();
     check($connection->alterations === 6 && count($connection->updates) === $before, 'Upgrade repeatable without deleting basket data');
     Checkout::onProlog();
     containsAll(\Bitrix\Main\Page\Asset::$strings[0], ['captureUrl', 'pv.abandonedcart/tools/capture.php', 'siteId', 's1']);
-    check(strpos(\Bitrix\Main\Page\Asset::$scripts[0], 'v=1.0.5') !== false, 'Versioned script');
+    check(strpos(\Bitrix\Main\Page\Asset::$scripts[0], 'v=1.0.6') !== false, 'Versioned script');
     echo "PASS: contacts, location, service names, partial updates, clearing, stable row, activity, order guards, new basket reset, basket backfill, site context, repeatable upgrade, asset config\n";
 }

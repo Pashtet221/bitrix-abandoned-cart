@@ -15,6 +15,7 @@
     inputs.forEach(function (el) {
       if (el.disabled || (el.type === 'radio' || el.type === 'checkbox') && !el.checked) return;
       var property = (el.name || '').match(/^ORDER_PROP_(\d+)(?:\[\])?$/) || (el.id || '').match(/^soa-property-(\d+)$/);
+      if (property && (!Array.isArray(config().allowedProperties) || config().allowedProperties.indexOf(property[1]) === -1)) return;
       var label = el.closest('.bx-soa-customer-field, .form-group');
       var caption = label && label.querySelector('label, .bx-soa-custom-label');
       var name = ((caption ? caption.textContent : '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.getAttribute('placeholder') || '')).toLowerCase();
@@ -40,15 +41,16 @@
   function consentOk(root) {
     // Respect explicit consent controls when present. No capture before consent.
     var consents = root.querySelectorAll('input[type="checkbox"][name*="AGREEMENT"], input[type="checkbox"][name*="CONSENT"], input[type="checkbox"][name*="agreement"], input[type="checkbox"][name*="consent"]');
-    return Array.prototype.every.call(consents, function (consent) { return consent.checked; });
+    return consents.length > 0 && Array.prototype.every.call(consents, function (consent) { return consent.checked; });
   }
   function send(onLeave) {
     var root = checkout();
-    if (inFlight || (Date.now() < retryAt && !onLeave) || !root || !consentOk(root) || !window.BX || !BX.bitrix_sessid) return;
+    if (config().contactCapture !== true || inFlight || (Date.now() < retryAt && !onLeave) || !root || !consentOk(root) || !window.BX || !BX.bitrix_sessid) return;
     var data = fields(root);
     if (!Object.keys(data).length) return;
     // The site can differ from the default site bootstrapped by a /local/modules URL.
     data.site_id = config().siteId || '';
+    data.consent = 'Y';
     var serialized = JSON.stringify(data);
     if (serialized === last) return;
     var form = new FormData();

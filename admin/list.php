@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         return;
     } elseif (($_POST['action'] ?? '') === 'save_settings') {
         Option::set($moduleId, 'timeout_minutes', (string)max(5, min(10080, (int)($_POST['timeout_minutes'] ?? 30))));
+        Option::set($moduleId, 'capture_contacts', ($_POST['capture_contacts'] ?? '') === 'Y' ? 'Y' : 'N');
         Option::set($moduleId, 'retention_days', (string)max(1, min(3650, (int)($_POST['retention_days'] ?? 90))));
         LocalRedirect($APPLICATION->GetCurPageParam('saved=1', ['saved', 'deleted', 'pv_refresh']));
         return;
@@ -142,17 +143,17 @@ if ($isRefresh) {
 }
 $modulePath = strpos(str_replace('\\', '/', __DIR__), '/local/modules/') !== false ? '/local/modules' : '/bitrix/modules';
 ?>
-<link rel="stylesheet" href="<?=pvEscape($modulePath)?>/pv.abandonedcart/assets/admin.css?v=1.0.5">
+<link rel="stylesheet" href="<?=pvEscape($modulePath)?>/pv.abandonedcart/assets/admin.css?v=1.0.6">
 <?php if ($error !== ''): ?><div class="adm-info-message" role="alert"><?=pvEscape($error)?></div><?php endif; ?>
 <?php if (isset($_GET['deleted'])): ?><div class="adm-info-message" role="status">Удалено записей: <?=max(0, (int)$_GET['deleted'])?></div><?php endif; ?>
 <div id="pv-cart-live"><?=$liveHtml?></div>
-<script src="<?=pvEscape($modulePath)?>/pv.abandonedcart/assets/admin.js?v=1.0.5"></script>
+<script src="<?=pvEscape($modulePath)?>/pv.abandonedcart/assets/admin.js?v=1.0.6"></script>
 <details class="pv-cart-settings"<?=isset($_GET['saved']) || isset($_GET['upgraded']) ? ' open' : ''?>><summary>Настройки и обновление модуля</summary>
 <h2>Настройки</h2>
 <?php if (isset($_GET['saved'])): ?><div class="adm-info-message">Настройки сохранены</div><?php endif; ?>
-<form method="post"><?=bitrix_sessid_post()?><input type="hidden" name="action" value="save_settings"><label>Считать брошенной через (мин): <input type="number" min="5" max="10080" name="timeout_minutes" value="<?= (int)Option::get($moduleId, 'timeout_minutes', '30') ?>"></label><br><br><label>Хранить данные (дней): <input type="number" min="1" max="3650" name="retention_days" value="<?= (int)Option::get($moduleId, 'retention_days', '90') ?>"></label><br><br><button class="adm-btn-save" type="submit">Сохранить</button></form>
+<form method="post"><?=bitrix_sessid_post()?><input type="hidden" name="action" value="save_settings"><p><label><input type="checkbox" name="capture_contacts" value="Y"<?=Option::get($moduleId, 'capture_contacts', 'N') === 'Y' ? ' checked' : ''?>> Собирать контакты и данные оформления</label></p><p class="pv-cart-muted">По умолчанию выключено. Включайте после настройки уведомления об обработке данных и флажка согласия в checkout. Без отмеченного согласия данные формы не отправляются.</p><label>Считать брошенной через (мин): <input type="number" min="5" max="10080" name="timeout_minutes" value="<?= (int)Option::get($moduleId, 'timeout_minutes', '30') ?>"></label><br><br><label>Хранить данные (дней): <input type="number" min="1" max="3650" name="retention_days" value="<?= (int)Option::get($moduleId, 'retention_days', '90') ?>"></label><br><br><button class="adm-btn-save" type="submit">Сохранить</button></form>
 <h2>Обновление модуля</h2>
 <?php if (isset($_GET['upgraded'])): ?><div class="adm-info-message">Обновление обработчиков и таблицы выполнено</div><?php endif; ?>
-<form method="post"><?=bitrix_sessid_post()?><input type="hidden" name="upgrade_module" value="1"><button class="adm-btn" type="submit">Применить обновление 1.0.5</button></form>
+<form method="post"><?=bitrix_sessid_post()?><input type="hidden" name="upgrade_module" value="1"><button class="adm-btn" type="submit">Применить обновление 1.0.6</button></form>
 </details>
 <?php require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/epilog_admin.php'; ?>

@@ -24,7 +24,7 @@ function setup(options = {}) {
   window.setInterval = (fn, interval) => { const id = ++serial; timers.set(id, { fn, due: clock + interval, interval }); return id; };
   window.clearTimeout = window.clearInterval = id => timers.delete(id);
   window.BX = { bitrix_sessid: () => 'session', addCustomEvent: (name, fn) => { (callbacks[name] ||= []).push(fn); } };
-  window.PVAbandonedCartConfig = { captureUrl: '/bitrix/modules/pv.abandonedcart/tools/capture.php', siteId: 's2' };
+  window.PVAbandonedCartConfig = { captureUrl: '/bitrix/modules/pv.abandonedcart/tools/capture.php', siteId: 's2', contactCapture: true, allowedProperties: ['1','2','3','4','5','6'] };
   // Reproduce a script executed out of Bitrix's combined cache bundle.
   Object.defineProperty(window.document, 'currentScript', { value: { src: 'https://example.test/bitrix/cache/js/s2/template/bundle.js' } });
   window.fetch = async (url, request) => {
@@ -145,4 +145,25 @@ test('hung request is aborted and synchronization can resume', async () => {
     ? new Promise((resolve, reject) => request.signal.addEventListener('abort', () => reject(new Error('aborted'))))
     : Promise.resolve({ ok: true, json: async () => ({ ok: true }) }) });
   try { await app.tick(30000); assert.equal(app.calls.length, 2); } finally { app.close(); }
+});
+
+test('contact capture is opt-in and requires an explicit consent control', async () => {
+  const app = setup();
+  try {
+    app.window.PVAbandonedCartConfig.contactCapture = false;
+    await app.tick(10000); assert.equal(app.calls.length, 0);
+    app.window.PVAbandonedCartConfig.contactCapture = true;
+    app.window.document.querySelector('[name="USER_CONSENT"]').remove();
+    await app.tick(10000); assert.equal(app.calls.length, 0);
+  } finally { app.close(); }
+});
+test('unapproved numeric checkout properties are never transmitted, even without a descriptive label', async () => {
+  const app = setup();
+  try {
+    const input = app.window.document.querySelector('[name="ORDER_PROP_8"]');
+    input.closest('.form-group').querySelector('label').textContent = 'Дополнительное поле';
+    await app.tick(900);
+    assert.ok(!Object.hasOwn(JSON.parse(app.calls[0].data.properties), '8'));
+    assert.equal(app.calls[0].data.consent, 'Y');
+  } finally { app.close(); }
 });

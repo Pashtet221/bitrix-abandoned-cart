@@ -3,6 +3,7 @@ namespace PV\AbandonedCart;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Page\Asset;
 use Bitrix\Sale\Fuser;
 
@@ -13,12 +14,22 @@ class Checkout
         if (defined('ADMIN_SECTION') && ADMIN_SECTION === true) { return; }
         if (!Loader::includeModule('sale')) { return; }
         $modulePath = strpos(str_replace('\\', '/', __DIR__), '/local/modules/') !== false ? '/local/modules' : '/bitrix/modules';
+        $contactCapture = Option::get('pv.abandonedcart', 'capture_contacts', 'N') === 'Y';
+        $allowedProperties = [];
+        if ($contactCapture) {
+            $properties = \Bitrix\Sale\Internals\OrderPropsTable::getList(['filter' => ['=ACTIVE' => 'Y']]);
+            while ($property = $properties->fetch()) {
+                if (self::propertyRole($property) !== null) { $allowedProperties[] = (string)$property['ID']; }
+            }
+        }
         $config = json_encode([
             'captureUrl' => $modulePath . '/pv.abandonedcart/tools/capture.php',
             'siteId' => defined('SITE_ID') ? SITE_ID : '',
+            'contactCapture' => $contactCapture,
+            'allowedProperties' => $allowedProperties,
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
         Asset::getInstance()->addString('<script>window.PVAbandonedCartConfig=' . $config . ';</script>');
-        Asset::getInstance()->addJs($modulePath . '/pv.abandonedcart/assets/checkout.js?v=1.0.5');
+        Asset::getInstance()->addJs($modulePath . '/pv.abandonedcart/assets/checkout.js?v=1.0.6');
     }
 
     public static function upgrade(): void
@@ -45,6 +56,17 @@ class Checkout
         $events->registerEventHandler('main', 'OnProlog', 'pv.abandonedcart', '\\PV\\AbandonedCart\\Checkout', 'onProlog');
     }
 
+    private static function propertyRole(array $property): ?string
+    {
+        $code = strtoupper((string)($property['CODE'] ?? ''));
+        if (($property['IS_EMAIL'] ?? 'N') === 'Y' || $code === 'EMAIL') { return 'email'; }
+        if (($property['IS_PHONE'] ?? 'N') === 'Y' || in_array($code, ['PHONE', 'MOBILE'], true)) { return 'phone'; }
+        if (($property['IS_PAYER'] ?? 'N') === 'Y' || in_array($code, ['FIO', 'NAME', 'LAST_NAME', 'SECOND_NAME'], true)) { return 'name'; }
+        if (($property['TYPE'] ?? '') === 'LOCATION' || ($property['IS_LOCATION'] ?? 'N') === 'Y') { return 'location'; }
+        if (($property['IS_ADDRESS'] ?? 'N') === 'Y' || ($property['IS_ZIP'] ?? 'N') === 'Y' || in_array($code, ['ADDRESS', 'CITY', 'ZIP', 'STREET', 'HOUSE', 'FLAT'], true)) { return 'address'; }
+        return null;
+    }
+
     private static function resolveInput(array $input, array $savedProperties = []): array
     {
         // Standard sale.order.ajax uses ORDER_PROP_<numeric ID>, without field codes.
@@ -66,24 +88,24 @@ class Checkout
                     if (!is_string($value)) { continue; }
                     $value = mb_substr(trim(strip_tags($value)), 0, 2000);
                     $known = true;
-                    $code = strtoupper((string)$property['CODE']);
-                    if (($property['IS_EMAIL'] ?? 'N') === 'Y' || $code === 'EMAIL') {
+                    $role = self::propertyRole($property);
+                    if ($role === 'email') {
                         if (!array_key_exists($property['ID'], $incomingProperties) && isset($input['email']) && is_string($input['email'])) { $value = $input['email']; }
                         $input['email'] = $value;
                     }
-                    elseif (($property['IS_PHONE'] ?? 'N') === 'Y' || in_array($code, ['PHONE', 'MOBILE'], true)) {
+                    elseif ($role === 'phone') {
                         if (!array_key_exists($property['ID'], $incomingProperties) && isset($input['phone']) && is_string($input['phone'])) { $value = $input['phone']; }
                         $input['phone'] = $value;
                     }
-                    elseif (($property['IS_PAYER'] ?? 'N') === 'Y' || in_array($code, ['FIO', 'NAME', 'LAST_NAME', 'SECOND_NAME'], true)) { $names[] = $value; }
-                    elseif ($property['TYPE'] === 'LOCATION' || ($property['IS_LOCATION'] ?? 'N') === 'Y') {
+                    elseif ($role === 'name') { $names[] = $value; }
+                    elseif ($role === 'location') {
                         $location = \Bitrix\Sale\Location\LocationTable::getList([
                             'filter' => ['=CODE' => $value, '=NAME.LANGUAGE_ID' => defined('LANGUAGE_ID') ? LANGUAGE_ID : 'ru'],
                             'select' => ['LOCATION_NAME' => 'NAME.NAME'], 'limit' => 1,
                         ])->fetch();
                         if ($location && $location['LOCATION_NAME']) { $address[] = $location['LOCATION_NAME']; }
                         elseif ($value === '') { $address[] = ''; }
-                    } elseif (($property['IS_ADDRESS'] ?? 'N') === 'Y' || ($property['IS_ZIP'] ?? 'N') === 'Y' || in_array($code, ['ADDRESS', 'CITY', 'ZIP', 'STREET', 'HOUSE', 'FLAT'], true)) {
+                    } elseif ($role === 'address') {
                         $address[] = $value;
                     } else { $known = false; }
                     if ($known) { $knownProperties[$property['ID']] = mb_substr(trim(strip_tags($value)), 0, 2000); }
@@ -117,6 +139,9 @@ class Checkout
 
     public static function capture(array $input): array
     {
+        if (Option::get('pv.abandonedcart', 'capture_contacts', 'N') !== 'Y' || ($input['consent'] ?? '') !== 'Y') {
+            return ['ok' => false, 'message' => 'Contact capture is disabled or consent is missing'];
+        }
         if (!Loader::includeModule('sale')) { return ['ok' => false, 'message' => 'Sale unavailable']; }
         $siteId = defined('SITE_ID') ? (string)SITE_ID : '';
         if (!empty($input['site_id']) && is_string($input['site_id'])) {
