@@ -18,7 +18,7 @@ class Checkout
             'siteId' => defined('SITE_ID') ? SITE_ID : '',
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
         Asset::getInstance()->addString('<script>window.PVAbandonedCartConfig=' . $config . ';</script>');
-        Asset::getInstance()->addJs($modulePath . '/pv.abandonedcart/assets/checkout.js?v=1.0.4');
+        Asset::getInstance()->addJs($modulePath . '/pv.abandonedcart/assets/checkout.js?v=1.0.5');
     }
 
     public static function upgrade(): void

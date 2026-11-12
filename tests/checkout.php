@@ -187,6 +187,6 @@ namespace {
     check($connection->alterations === 6 && count($connection->updates) === $before, 'Upgrade repeatable without deleting basket data');
     Checkout::onProlog();
     containsAll(\Bitrix\Main\Page\Asset::$strings[0], ['captureUrl', 'pv.abandonedcart/tools/capture.php', 'siteId', 's1']);
-    check(strpos(\Bitrix\Main\Page\Asset::$scripts[0], 'v=1.0.4') !== false, 'Versioned script');
+    check(strpos(\Bitrix\Main\Page\Asset::$scripts[0], 'v=1.0.5') !== false, 'Versioned script');
     echo "PASS: contacts, location, service names, partial updates, clearing, stable row, activity, order guards, new basket reset, basket backfill, site context, repeatable upgrade, asset config\n";
 }
